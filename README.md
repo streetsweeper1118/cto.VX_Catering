@@ -1,4 +1,14 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## 餐饮点单 Demo（后台 + 点单端）
+
+这是一个基于 Next.js App Router 的最小可用原型：
+
+- 点单端：`/order`
+- 后台管理端：`/admin`
+- 菜单 API：`GET /api/menu`
+- 下单 API：`POST /api/orders`
+- 订单管理 API：`GET /api/admin/orders` / `PATCH /api/admin/orders/:id`
+
+数据默认使用本地 JSON 文件（`data/db.json`，会在首次访问 API 时自动生成）。
 
 ## Getting Started
 
