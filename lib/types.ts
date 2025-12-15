@@ -40,7 +40,22 @@ export type Order = {
   total: number;
 };
 
+export type StoreMode = "manual" | "hours";
+
+export type StoreHours = {
+  open: string; // HH:mm
+  close: string; // HH:mm
+};
+
+export type StoreSettings = {
+  mode: StoreMode;
+  manualIsOpen: boolean;
+  hours: StoreHours;
+  closedMessage: string;
+};
+
 export type DB = {
+  store: StoreSettings;
   categories: MenuCategory[];
   items: MenuItem[];
   orders: Order[];

@@ -7,6 +7,8 @@
 - 菜单 API：`GET /api/menu`
 - 下单 API：`POST /api/orders`
 - 订单管理 API：`GET /api/admin/orders` / `PATCH /api/admin/orders/:id`
+- 店铺营业状态：`GET /api/store`（打烊时会返回提示文案）
+- 店铺营业设置：`GET/PUT /api/admin/store`
 
 数据默认使用本地 JSON 文件（`data/db.json`，会在首次访问 API 时自动生成）。
 

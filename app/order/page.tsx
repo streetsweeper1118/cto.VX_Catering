@@ -219,8 +219,22 @@ export default function OrderPage() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold">菜单</div>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {menu ? `${menu.categories.reduce((n, c) => n + c.items.length, 0)} 道菜` : "加载中…"}
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {menu ? `${menu.categories.reduce((n, c) => n + c.items.length, 0)} 道菜` : "加载中…"}
+                    </div>
+                    {menu ? (
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          menu.store.isOpen
+                            ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50"
+                            : "bg-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-50"
+                        }`}
+                        title={menu.store.message}
+                      >
+                        {menu.store.isOpen ? "营业中" : "已打烊"}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 
@@ -334,9 +348,25 @@ export default function OrderPage() {
                       />
                     </label>
 
+                    {menu && !menu.store.isOpen ? (
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs text-zinc-700 shadow-sm dark:border-zinc-800 dark:bg-black/20 dark:text-zinc-200">
+                        <div className="font-semibold">当前无法下单</div>
+                        <div className="mt-1 opacity-90">{menu.store.message}</div>
+                        {menu.store.nextChangeAt && menu.store.nextChange === "open" ? (
+                          <div className="mt-1 opacity-80">
+                            预计开店时间：{new Date(menu.store.nextChangeAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     <button
                       type="button"
-                      disabled={submitting || cartLines.length === 0}
+                      disabled={
+                        submitting ||
+                        cartLines.length === 0 ||
+                        (menu ? !menu.store.isOpen : false)
+                      }
                       onClick={() => {
                         submitOrder().catch((err: unknown) => {
                           const message = err instanceof Error ? err.message : "Unknown error";

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createOrder, listOrders } from "@/lib/db";
+import { StoreClosedError, createOrder, listOrders } from "@/lib/db";
 import type { CreateOrderInput } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ order }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const status = err instanceof StoreClosedError ? 409 : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

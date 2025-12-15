@@ -43,9 +43,10 @@ export default function AdminHomePage() {
           </div>
         </header>
 
-        <section className="grid gap-5 md:grid-cols-2">
+        <section className="grid gap-5 md:grid-cols-3">
           <CardLink href="/admin/menu" title="菜单管理" description="新增分类/菜品、上下架、快速筛选与搜索。" />
           <CardLink href="/admin/orders" title="订单管理" description="实时刷新、展开查看明细、更新制作状态。" />
+          <CardLink href="/admin/store" title="营业设置" description="营业中/打烊切换、营业时间、打烊文案。" />
         </section>
 
         <section className="rounded-2xl border border-zinc-200/70 bg-white/60 p-6 text-sm text-zinc-600 shadow-sm backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/50 dark:text-zinc-300">

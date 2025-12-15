@@ -2,12 +2,63 @@ import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { DB, MenuCategory, MenuItem, Order, OrderItem, OrderStatus } from "@/lib/types";
+import type {
+  DB,
+  MenuCategory,
+  MenuItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+  StoreHours,
+  StoreMode,
+  StoreSettings,
+} from "@/lib/types";
 
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DB_DIR, "db.json");
 
 let writeQueue: Promise<void> = Promise.resolve();
+
+function parseTimeToMinutes(time: string): number | null {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
+  if (!m) return null;
+  const hours = Number(m[1]);
+  const minutes = Number(m[2]);
+  return hours * 60 + minutes;
+}
+
+function seedStoreSettings(): StoreSettings {
+  return {
+    mode: "hours",
+    manualIsOpen: true,
+    hours: { open: "09:00", close: "21:00" },
+    closedMessage: "本店已打烊",
+  };
+}
+
+function normalizeStoreSettings(input: unknown): StoreSettings {
+  const seed = seedStoreSettings();
+  if (!input || typeof input !== "object") return seed;
+
+  const obj = input as Partial<StoreSettings>;
+  const mode: StoreMode = obj.mode === "manual" || obj.mode === "hours" ? obj.mode : seed.mode;
+  const manualIsOpen = typeof obj.manualIsOpen === "boolean" ? obj.manualIsOpen : seed.manualIsOpen;
+
+  const open = typeof obj.hours?.open === "string" ? obj.hours.open : seed.hours.open;
+  const close = typeof obj.hours?.close === "string" ? obj.hours.close : seed.hours.close;
+
+  const hours: StoreHours = {
+    open: parseTimeToMinutes(open) === null ? seed.hours.open : open,
+    close: parseTimeToMinutes(close) === null ? seed.hours.close : close,
+  };
+
+  const closedMessage =
+    typeof obj.closedMessage === "string" && obj.closedMessage.trim()
+      ? obj.closedMessage.trim()
+      : seed.closedMessage;
+
+  return { mode, manualIsOpen, hours, closedMessage };
+}
 
 function seedDB(): DB {
   const categories: MenuCategory[] = [
@@ -54,9 +105,27 @@ function seedDB(): DB {
   ];
 
   return {
+    store: seedStoreSettings(),
     categories,
     items,
     orders: [],
+  };
+}
+
+function normalizeDB(input: unknown): DB {
+  const seed = seedDB();
+
+  if (!input || typeof input !== "object") {
+    return seed;
+  }
+
+  const obj = input as Partial<DB>;
+
+  return {
+    store: normalizeStoreSettings(obj.store),
+    categories: Array.isArray(obj.categories) ? (obj.categories as MenuCategory[]) : seed.categories,
+    items: Array.isArray(obj.items) ? (obj.items as MenuItem[]) : seed.items,
+    orders: Array.isArray(obj.orders) ? (obj.orders as Order[]) : [],
   };
 }
 
@@ -72,7 +141,7 @@ async function ensureDBFile(): Promise<void> {
 async function readDBUnsafe(): Promise<DB> {
   await ensureDBFile();
   const raw = await fs.readFile(DB_PATH, "utf8");
-  return JSON.parse(raw) as DB;
+  return normalizeDB(JSON.parse(raw) as unknown);
 }
 
 async function writeDBUnsafe(db: DB): Promise<void> {
@@ -100,7 +169,144 @@ export async function updateDB(updater: (db: DB) => DB): Promise<DB> {
   return task;
 }
 
+export type StoreStatus = {
+  isOpen: boolean;
+  mode: StoreMode;
+  hours: StoreHours;
+  message: string;
+  nextChangeAt?: string;
+  nextChange?: "open" | "close";
+};
+
+function buildDateAtMinutes(now: Date, minutes: number, dayOffset: number) {
+  const date = new Date(now);
+  date.setDate(date.getDate() + dayOffset);
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date;
+}
+
+function computeStoreStatus(store: StoreSettings, now = new Date()): StoreStatus {
+  if (store.mode === "manual") {
+    return {
+      isOpen: store.manualIsOpen,
+      mode: store.mode,
+      hours: store.hours,
+      message: store.manualIsOpen
+        ? "营业中"
+        : `${store.closedMessage}（营业时间 ${store.hours.open}-${store.hours.close}）`,
+    };
+  }
+
+  const openMin = parseTimeToMinutes(store.hours.open) ?? 0;
+  const closeMin = parseTimeToMinutes(store.hours.close) ?? 0;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  if (openMin === closeMin) {
+    return {
+      isOpen: true,
+      mode: store.mode,
+      hours: store.hours,
+      message: "营业中 · 24小时",
+    };
+  }
+
+  const isOpen =
+    openMin < closeMin
+      ? nowMin >= openMin && nowMin < closeMin
+      : nowMin >= openMin || nowMin < closeMin;
+
+  let nextChangeAt: string | undefined;
+  let nextChange: "open" | "close" | undefined;
+
+  if (isOpen) {
+    nextChange = "close";
+    if (openMin < closeMin) {
+      nextChangeAt = buildDateAtMinutes(now, closeMin, 0).toISOString();
+    } else {
+      nextChangeAt =
+        nowMin >= openMin
+          ? buildDateAtMinutes(now, closeMin, 1).toISOString()
+          : buildDateAtMinutes(now, closeMin, 0).toISOString();
+    }
+  } else {
+    nextChange = "open";
+    if (openMin < closeMin) {
+      nextChangeAt = (nowMin < openMin
+        ? buildDateAtMinutes(now, openMin, 0)
+        : buildDateAtMinutes(now, openMin, 1)
+      ).toISOString();
+    } else {
+      nextChangeAt = buildDateAtMinutes(now, openMin, 0).toISOString();
+    }
+  }
+
+  return {
+    isOpen,
+    mode: store.mode,
+    hours: store.hours,
+    message: isOpen
+      ? `营业中 · ${store.hours.open}-${store.hours.close}`
+      : `${store.closedMessage}（营业时间 ${store.hours.open}-${store.hours.close}）`,
+    nextChangeAt,
+    nextChange,
+  };
+}
+
+export async function getStoreSettings(): Promise<StoreSettings> {
+  const db = await getDB();
+  return db.store;
+}
+
+export async function getStoreStatus(): Promise<StoreStatus> {
+  const db = await getDB();
+  return computeStoreStatus(db.store);
+}
+
+export type UpdateStoreSettingsInput = Partial<
+  Pick<StoreSettings, "mode" | "manualIsOpen" | "hours" | "closedMessage">
+>;
+
+export async function updateStoreSettings(input: UpdateStoreSettingsInput): Promise<StoreSettings> {
+  let updated: StoreSettings | undefined;
+
+  await updateDB((db) => {
+    const next: StoreSettings = {
+      ...db.store,
+      mode: input.mode ?? db.store.mode,
+      manualIsOpen: input.manualIsOpen ?? db.store.manualIsOpen,
+      hours: {
+        open: input.hours?.open ?? db.store.hours.open,
+        close: input.hours?.close ?? db.store.hours.close,
+      },
+      closedMessage: input.closedMessage ?? db.store.closedMessage,
+    };
+
+    if (parseTimeToMinutes(next.hours.open) === null || parseTimeToMinutes(next.hours.close) === null) {
+      throw new Error("Invalid hours format, expected HH:mm");
+    }
+
+    if (!next.closedMessage.trim()) {
+      throw new Error("Closed message is required");
+    }
+
+    const nextStore: StoreSettings = {
+      ...next,
+      closedMessage: next.closedMessage.trim(),
+    };
+
+    updated = nextStore;
+    return { ...db, store: nextStore };
+  });
+
+  if (!updated) {
+    throw new Error("Store settings update failed");
+  }
+
+  return updated;
+}
+
 export type MenuResponse = {
+  store: StoreStatus;
   categories: Array<MenuCategory & { items: MenuItem[] }>;
 };
 
@@ -113,6 +319,7 @@ export async function getMenu(): Promise<MenuResponse> {
     .sort((a, b) => a.sort - b.sort);
 
   return {
+    store: computeStoreStatus(db.store),
     categories: categories.map((c) => ({
       ...c,
       items: items.filter((i) => i.categoryId === c.id),
@@ -306,6 +513,13 @@ export async function deleteItem(itemId: string): Promise<void> {
   }));
 }
 
+export class StoreClosedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StoreClosedError";
+  }
+}
+
 export type CreateOrderInput = {
   items: Array<{ menuItemId: string; quantity: number }>;
   table?: string;
@@ -324,6 +538,11 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const createdAt = new Date().toISOString();
 
   const dbAfter = await updateDB((db) => {
+    const store = computeStoreStatus(db.store);
+    if (!store.isOpen) {
+      throw new StoreClosedError(store.message);
+    }
+
     const itemMap = new Map(db.items.map((i) => [i.id, i] as const));
 
     const items: OrderItem[] = input.items.map((line) => {
